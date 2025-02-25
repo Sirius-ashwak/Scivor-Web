@@ -57,6 +57,8 @@ const RecipeCard = ({ onSubmit }) => {
       }
 
       setImagePreview(URL.createObjectURL(file));
+      console.log('Uploading image:', file); // Debug log
+
       const formData = new FormData();
       formData.append('image', file);
 
@@ -255,7 +257,6 @@ const RecipeCard = ({ onSubmit }) => {
 function App() {
   const [recipeData, setRecipeData] = useState(null);
   const [recipeText, setRecipeText] = useState("");
-  const [recipeImage, setRecipeImage] = useState(null);
 
   let eventSourceRef = useRef(null);
 
@@ -282,9 +283,6 @@ function App() {
       const data = JSON.parse(event.data);
       if (data.action === "close") {
         closeEventStream();
-        // Get recipe name and generate image
-        const recipeName = recipeText.split('\n')[0];
-        generateRecipeImage(recipeName);
       } else if (data.action === "chunk") {
         setRecipeText((prev) => prev + data.chunk);
       }
@@ -308,26 +306,13 @@ function App() {
     setRecipeData(data);
   }
 
-  const generateRecipeImage = async (recipeName) => {
-    try {
-      const response = await fetch(`http://localhost:3001/generateImage?recipeName=${encodeURIComponent(recipeName)}`);
-      if (!response.ok) throw new Error('Failed to generate image');
-      
-      const data = await response.json();
-      setRecipeImage(`data:image/png;base64,${data.imageUrl}`);
-    } catch (error) {
-      console.error('Error generating image:', error);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-6xl font-bold mb-4 header-title" 
+          <h1 className="text-6xl font-bold mb-4 text-white header-title" 
             style={{ 
-              color: 'white',
               textShadow: '2px 2px 4px rgba(0, 0, 0, 0.5)',
               letterSpacing: '1px',
             }}>
@@ -356,17 +341,6 @@ function App() {
                 <h1 className="text-3xl font-playfair font-bold text-center mb-8 pb-4 border-b border-gray-200" style={{ color: '#1a202c' }}>
                   {recipeText.split('\n')[0]}
                 </h1>
-
-                {/* Recipe Image */}
-                {recipeImage && (
-                  <div className="mb-8 flex justify-center">
-                    <img 
-                      src={recipeImage} 
-                      alt="Generated recipe" 
-                      className="rounded-lg shadow-md max-w-[400px]"
-                    />
-                  </div>
-                )}
 
                 {/* Recipe Details Card */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -460,14 +434,22 @@ function App() {
                   </ul>
                 </div>
 
-                {/* Servings */}
-                <div className="mt-8 text-center">
+                {/* Servings and Calories */}
+                <div className="mt-8 flex justify-center space-x-8">
                   <div className="inline-flex items-center px-4 py-2 bg-gray-100 rounded-full">
                     <span className="mr-2">👥</span>
                     <span className="font-semibold text-gray-700">
                       Serves: {recipeText.match(/SERVINGS: (\d+)/)?.[1] || '4'} people
                     </span>
                   </div>
+                  {recipeText.match(/CALORIES: (\d+)/)?.[1] && (
+                    <div className="inline-flex items-center px-4 py-2 bg-green-100 rounded-full">
+                      <span className="mr-2">🔥</span>
+                      <span className="font-semibold text-gray-700">
+                        {recipeText.match(/CALORIES: (\d+)/)[1]} calories per serving
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

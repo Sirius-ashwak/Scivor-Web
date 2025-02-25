@@ -6,7 +6,14 @@ const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
+
+const corsOptions = {
+  origin: 'http://localhost:3000',
+  methods: ['GET', 'POST'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 
 // Configure multer for handling file uploads
 const upload = multer({
@@ -16,17 +23,10 @@ const upload = multer({
   },
 });
 
-// Initialize Gemini API with the key directly (temporary for testing)
-const genAI = new GoogleGenerativeAI("AIzaSyCwYy-alM1qOKfDYRFsyS2sHlzbuioyTB0");
+// Initialize Google Generative AI
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
-// Use hardcoded key
-const STABILITY_API_KEY = 'sk-X0Wz59YQcPFIxrGw9ygZK7wWE253pUXHYvuAJTpG8GaQdFD4';
-
-// Add this near the top with other constants
-// const UNSPLASH_API_KEY = 'YOUR_UNSPLASH_API_KEY';  // You'll need to get this from Unsplash
-// const PEXELS_API_KEY = 'YOUR_PEXELS_API_KEY';  // Get this from Pexels
-
-// Add this after your imports
+// Ingredient shelf life data
 const ingredientShelfLife = {
   tomatoes: { room: "5-7 days", refrigerated: "1-2 weeks", frozen: "6-8 months" },
   lettuce: { room: "1-2 days", refrigerated: "7-10 days", frozen: "Not recommended" },
@@ -57,12 +57,15 @@ const ingredientShelfLife = {
   rosemary: { room: "1-2 weeks", refrigerated: "2-3 weeks", frozen: "4-6 months" }
 };
 
-// Update the image analysis endpoint
+// Image analysis endpoint
 app.post('/analyze-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
+      console.log('No image file provided'); // Debug log
       return res.status(400).json({ error: 'No image file provided' });
     }
+
+    console.log('Received image:', req.file); // Debug log
 
     // Convert image buffer to base64
     const imageBase64 = req.file.buffer.toString('base64');
@@ -91,7 +94,7 @@ app.post('/analyze-image', upload.single('image'), async (req, res) => {
 
     const response = await result.response;
     const text = response.text();
-    console.log('API Response:', text);
+    console.log('API Response:', text); // Debug log
 
     // Process the response to get ingredients with shelf life
     const ingredients = text
@@ -115,11 +118,13 @@ app.post('/analyze-image', upload.single('image'), async (req, res) => {
       })
       .filter(item => item.name.length > 0);  // Final filter for any empty names
 
+    console.log('Processed ingredients:', ingredients); // Debug log
+
     if (ingredients.length === 0) {
+      console.log('No ingredients detected'); // Debug log
       throw new Error('No ingredients detected in the image');
     }
 
-    console.log('Processed ingredients:', ingredients); // Debug log
     res.json({ ingredients });
 
   } catch (error) {
@@ -158,187 +163,60 @@ app.get('/recipeStream', async (req, res) => {
       throw new Error('Please fill in all fields');
     }
 
-    const prompt = `Create a recipe with the following specifications:
-    - Cuisine: ${cuisine}
-    - Meal Type: ${mealType}
-    - Cooking Time: ${cookingTime}
-    - Complexity: ${complexity}
-    - Main Ingredients: ${ingredients}
-
-    Format the recipe exactly like this:
-
-    [Recipe Name]
-    =============
-
-    DETAILS
-    -------
-    • Cuisine: [cuisine type]
-    • Meal Type: [meal type]
-    • Cooking Time: [time]
-    • Complexity: [level]
-
-    INGREDIENTS
-    ----------
-    • [ingredient 1]
-    • [ingredient 2]
-    • [ingredient 3]
-
-    INSTRUCTIONS
-    -----------
-    1. [First step]
-    2. [Second step]
-    3. [Third step]
-
-    COOKING TIPS
-    -----------
-    • [Tip 1]
-    • [Tip 2]
-
-    SERVINGS: [number]`;
+    const prompt = `
+      Generate a recipe using the following ingredients: ${ingredients}.
+      The recipe should be for a ${mealType} and should be ${complexity} to make.
+      The cuisine should be ${cuisine}.
+      The cooking time should be ${cookingTime}.
+      
+      Provide the recipe in the following format:
+      [Recipe Name]
+      DETAILS:
+      • Cuisine: [Cuisine]
+      • Meal Type: [Meal Type]
+      • Cooking Time: [Cooking Time]
+      • Complexity: [Complexity]
+      INGREDIENTS:
+      • [Ingredient 1]
+      • [Ingredient 2]
+      ...
+      INSTRUCTIONS:
+      1. [Step 1]
+      2. [Step 2]
+      ...
+      COOKING TIPS:
+      • [Tip 1]
+      • [Tip 2]
+      ...
+      SERVINGS: [Number of Servings]
+      CALORIES: [Calories per Serving]
+      SHELF LIFE:
+      • [Ingredient 1]: [Shelf Life]
+      • [Ingredient 2]: [Shelf Life]
+      ...
+    `;
 
     console.log('Sending prompt to Gemini:', prompt); // Debug log
 
     // Initialize the model for recipe generation
     const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-    const formatRecipeResponse = (text) => {
-      // Split the response into sections
-      const sections = text.split(/\n(?=[A-Z]+:?(?:\n|$))/);
-      
-      let formattedSections = [];
-      
-      sections.forEach(section => {
-        if (section.includes('DETAILS')) {
-          const details = section
-            .split('\n')
-            .filter(line => line.trim())
-            .map(line => line.trim())
-            .join('\n');
-          formattedSections.push(details);
-        }
-        else if (section.includes('INGREDIENTS')) {
-          const ingredients = section
-            .split('\n')
-            .filter(line => line.trim())
-            .map(line => line.trim())
-            .join('\n');
-          formattedSections.push('\n' + ingredients + '\n');
-        }
-        else if (section.includes('INSTRUCTIONS')) {
-          const instructions = section
-            .split('\n')
-            .filter(line => line.trim())
-            .map(line => line.trim())
-            .join('\n');
-          formattedSections.push('\n' + instructions + '\n');
-        }
-        else if (section.includes('COOKING TIPS')) {
-          const tips = section
-            .split('\n')
-            .filter(line => line.trim())
-            .map(line => line.trim())
-            .join('\n');
-          formattedSections.push('\n' + tips + '\n');
-        }
-        else if (section.includes('SERVINGS')) {
-          formattedSections.push('\n' + section.trim());
-        }
-        else {
-          // This is the title
-          formattedSections.push(section.trim() + '\n=================\n');
-        }
-      });
-
-      return formattedSections.join('\n');
-    };
-
-    try {
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
-      // Format the text
-      const formattedText = formatRecipeResponse(text);
-      
-      // Split into lines and send
-      const lines = formattedText.split('\n');
-      
-      for (const line of lines) {
-        if (line.trim()) {  // Only send non-empty lines
-          res.write(`data: ${JSON.stringify({ action: 'chunk', chunk: line + '\n' })}\n\n`);
-          await new Promise(resolve => setTimeout(resolve, 20));
-        }
-      }
-
-      res.write(`data: ${JSON.stringify({ action: 'close' })}\n\n`);
-      res.end();
-    } catch (genError) {
-      console.error('Gemini API Error:', genError);
-      throw new Error('Failed to generate recipe');
-    }
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    
+    // Extract calories from the generated recipe
+    const caloriesMatch = text.match(/CALORIES: (\d+)/);
+    const calories = caloriesMatch ? caloriesMatch[1] : null;
+    
+    // Extract shelf life information from the generated recipe
+    const shelfLifeMatch = text.match(/SHELF LIFE:\n((?:• .*\n)+)/);
+    const shelfLife = shelfLifeMatch ? shelfLifeMatch[1].trim() : null;
+    
+    res.json({ recipe: text, calories, shelfLife });
 
   } catch (error) {
     console.error('Error:', error);
-    res.write(`data: ${JSON.stringify({ action: 'error', error: error.message })}\n\n`);
-    res.end();
-  }
-});
-
-// Update back to the original generateImage endpoint
-app.get('/generateImage', async (req, res) => {
-  try {
-    const { recipeName } = req.query;
-    
-    // Log to verify we're using the correct key
-    console.log('Using Stability API key:', STABILITY_API_KEY.substring(0, 10) + '...');
-    
-    // Initialize the model
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
-    // Create prompt for image description
-    const imagePrompt = `Create a detailed description for a food photography of ${recipeName}. 
-    Focus on plating, garnishes, and presentation. Make it look appetizing and professional.
-    Format: Only provide the description, no additional text.`;
-
-    const result = await model.generateContent(imagePrompt);
-    const imageDescription = result.response.text();
-    
-    console.log('Generated description:', imageDescription); // Debug log
-
-    // Now use this description to generate an image using Stability API
-    const response = await fetch('https://api.stability.ai/v1/generation/stable-diffusion-v1-6/text-to-image', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${STABILITY_API_KEY}`,
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({
-        text_prompts: [
-          {
-            text: `Professional food photography of ${recipeName}. ${imageDescription}`,
-            weight: 1
-          }
-        ],
-        cfg_scale: 7,
-        height: 512,
-        width: 512,
-        samples: 1,
-        steps: 30,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Stability API error:', errorData); // Debug log
-      throw new Error(`Stability API error: ${errorData.message}`);
-    }
-
-    const imageData = await response.json();
-    res.json({ imageUrl: imageData.artifacts[0].base64 });
-
-  } catch (error) {
-    console.error('Error generating image:', error);
     res.status(500).json({ error: error.message });
   }
 });
